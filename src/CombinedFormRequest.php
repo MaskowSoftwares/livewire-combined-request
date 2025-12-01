@@ -3,6 +3,7 @@
 namespace Maskow\CombinedRequest;
 
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Auth\Access\Response;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Request;
@@ -137,9 +138,28 @@ abstract class CombinedFormRequest extends FormRequest {
 
         try {
             $result = $this->container->call([$this, 'authorize']);
-            $result->authorize();
         } catch (AuthorizationException $e) {
             $this->throwLivewireAuthorizationException($e);
+        }
+
+        if ($result instanceof Response) {
+            if ($result->denied()) {
+                $message   = $result->message() ?: $this->authorizationMessage();
+                $exception = (new AuthorizationException($message, $result->code()))
+                    ->setResponse($result);
+
+                if ($result->status()) {
+                    $exception->withStatus($result->status());
+                }
+
+                $this->throwLivewireAuthorizationException($exception);
+            }
+
+            return;
+        }
+
+        if ($result === false) {
+            $this->throwLivewireAuthorizationException(new AuthorizationException($this->authorizationMessage()));
         }
     }
 
@@ -222,6 +242,19 @@ abstract class CombinedFormRequest extends FormRequest {
         return null;
     }
 
+    /**
+     * Get validated data (ensuring validation has run for both HTTP and Livewire).
+     *
+     * @param  mixed  $key
+     * @param  mixed  $default
+     * @return mixed
+     */
+    public function validated($key = null, $default = null) {
+        $this->ensureValidatorIsReady();
+
+        return parent::validated($key, $default);
+    }
+
     protected function failedValidation(Validator $validator) {
         if ($this->runningLivewireValidation) {
             throw (new ValidationException($validator))->errorBag($this->errorBag);
@@ -231,8 +264,6 @@ abstract class CombinedFormRequest extends FormRequest {
     }
 
     protected function failedAuthorization() {
-        dd('123');
-
         if ($this->livewireComponent) {
             $this->throwLivewireAuthorizationException();
         }
@@ -260,5 +291,22 @@ abstract class CombinedFormRequest extends FormRequest {
         }
 
         call_user_func(static::$authorizationNotifier, $this->livewireComponent, $message);
+    }
+
+    /**
+     * Ensure a validator exists before accessing validated data.
+     */
+    protected function ensureValidatorIsReady(): void {
+        if ($this->validator) {
+            return;
+        }
+
+        if ($this->livewireComponent) {
+            $this->validateWithLivewire();
+
+            return;
+        }
+
+        $this->validateResolved();
     }
 }
