@@ -1,0 +1,46 @@
+{
+    "name": "maskow/livewire-combined-request",
+    "description": "Shared FormRequest base that works for both Laravel HTTP controllers and Livewire components.",
+    "keywords": [
+        "laravel",
+        "livewire",
+        "form request"
+    ],
+    "homepage": "https://github.com/MaskowSoftwares/livewire-combined-request#readme",
+    "type": "library",
+    "autoload": {
+        "psr-4": {
+            "Maskow\\CombinedRequest\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Julius Maskow",
+            "email": "github@maskow.io",
+            "homepage": "https://www.software-stratege.de",
+            "role": "Developer"
+        }
+    ],
+    "support": {
+        "email": "github@maskow.io",
+        "issues": "https://github.com/MaskowSoftwares/livewire-combined-request/issues",
+        "source": "https://github.com/MaskowSoftwares/livewire-combined-request",
+        "docs": "https://github.com/MaskowSoftwares/livewire-combined-request#readme"
+    },
+    "require": {
+        "php": "^8.1",
+        "laravel/framework": "^10.0 || ^11.0 || ^12.0",
+        "livewire/livewire": "^3.0"
+    },
+    "license": "Apache-2.0",
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Maskow\\CombinedRequest\\LivewireCombinedRequestServiceProvider"
+            ]
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
