@@ -5,7 +5,7 @@ Shared FormRequest base that you can use in both classic HTTP controllers and Li
 ## Requirements
 
 - PHP 8.1+
-- Laravel 10 / 11 (works with future 12.x releases once available)
+- Laravel 10 / 11 / 12
 - Livewire 3
 
 ## Installation
@@ -26,17 +26,69 @@ No configuration or manual service provider registration is required.
 namespace App\Http\Requests;
 
 use Maskow\CombinedRequest\CombinedFormRequest;
+use Illuminate\Auth\Access\Response;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Validation\Validator;
 
 class ProfileRequest extends CombinedFormRequest {
-    public function authorize(): bool {
-        return true;
+
+    /**
+     * Check for Permission
+     */
+    public function authorize(): bool|Response {
+        if(Auth::check()){
+            Response::allow();
+        }
+
+        return Response::deny('Please login, dude!');
     }
 
+    /**
+     * Validation Rules
+     */
     public function rules(): array {
         return [
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255'],
         ];
+    }
+
+    /**
+     * Prepare Data for Validation
+     */
+    public function prepareForValidation(): array {
+        $this->merge([
+            'email' => strtolower($this->email)
+        ]);
+    }
+
+    /**
+     * Perform Additional Validation
+     */
+    public function withValidator(Validator $validator){
+        $validator->after(function($validator){
+            if(strtolower($this->name) === 'john doe'){
+                $validator->errors()->add('name', 'Who the hell are you?');
+            }
+        });
+    }
+
+    /**
+     * Customize Attribute Names
+     */
+    public function attributes(): array {
+        return [
+            'email' => 'email address'
+        ]:
+    }
+
+    /**
+     * Customize Messages
+     */
+    public function messages(): array {
+        return [
+            'email.required' => 'Please provide an email.'
+        ]
     }
 }
 ```
@@ -76,12 +128,6 @@ class ProfileForm extends Component {
 }
 ```
 
-You can also build the request manually if you need more control:
-
-```php
-$request = ProfileRequest::fromLivewire($this);
-$data = $request->validateWithLivewire();
-```
 
 ### Handling authorization
 
@@ -92,6 +138,8 @@ use Maskow\CombinedRequest\CombinedFormRequest;
 
 CombinedFormRequest::notifyAuthorizationUsing(function ($component, string $message) {
     $component->addError('authorization', $message);
+    // Log::warning('Authorization failed!');
+    // $component->js('alert("Authorization failed!")');
 });
 ```
 
