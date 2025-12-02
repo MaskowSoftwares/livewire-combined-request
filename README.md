@@ -30,65 +30,51 @@ use Illuminate\Auth\Access\Response;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Validator;
 
-class ProfileRequest extends CombinedFormRequest {
-
-    /**
-     * Check for Permission
-     */
-    public function authorize(): bool|Response {
-        if(Auth::check()){
-            Response::allow();
-        }
-
-        return Response::deny('Please login, dude!');
+class ProfileRequest extends CombinedFormRequest
+{
+    public function authorize(): bool|Response
+    {
+        return Auth::check()
+            ? Response::allow()
+            : Response::deny('Please login, dude!');
     }
 
-    /**
-     * Validation Rules
-     */
-    public function rules(): array {
+    public function rules(): array
+    {
         return [
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', 'max:255'],
         ];
     }
 
-    /**
-     * Prepare Data for Validation
-     */
-    public function prepareForValidation(): array {
+    protected function prepareForValidation(): void
+    {
         $this->merge([
-            'email' => strtolower($this->email)
+            'email' => strtolower((string) $this->email),
         ]);
     }
 
-    /**
-     * Perform Additional Validation
-     */
-    public function withValidator(Validator $validator){
-        $validator->after(function($validator){
-            if(strtolower($this->name) === 'john doe'){
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator) {
+            if (strtolower((string) $this->name) === 'john doe') {
                 $validator->errors()->add('name', 'Who the hell are you?');
             }
         });
     }
 
-    /**
-     * Customize Attribute Names
-     */
-    public function attributes(): array {
+    public function attributes(): array
+    {
         return [
-            'email' => 'email address'
-        ]:
+            'email' => 'email address',
+        ];
     }
 
-    /**
-     * Customize Messages
-     */
-    public function messages(): array {
+    public function messages(): array
+    {
         return [
-            'email.required' => 'Please provide an email.'
-        ]
+            'email.required' => 'Please provide an email.',
+        ];
     }
 }
 ```
@@ -142,6 +128,15 @@ CombinedFormRequest::notifyAuthorizationUsing(function ($component, string $mess
     // $component->js('alert("Authorization failed!")');
 });
 ```
+
+## How it works (under the hood)
+
+- `ProfileRequest::validateLivewire($this)` builds a fake HTTP request from the component (`fromLivewire`), wiring the service container and redirector so the normal FormRequest pipeline can run.
+- The component’s public properties are pulled into the request (`prepareLivewireValidationData`), files are split out, values are normalized for Symfony’s `InputBag`, and your `prepareForValidation` hook runs so data can be mutated first.
+- Authorization is executed via your `authorize` method; denials are converted into a `ValidationException` on the `authorization` key (and optionally sent to your notifier).
+- The usual validator is created (`getValidatorInstance`), `withValidator` callbacks run, and on success the component’s error bag is cleared and the validated/mutated data is written back to the component via `fill`.
+- `validationData()` is overridden to feed the prepared Livewire payload to the validator, and `validated()` ensures validation is triggered even if you call it directly on the request.
+
 
 ## License
 
