@@ -1,6 +1,13 @@
 # Livewire Combined Request
 
-Shared FormRequest base that you can use in both classic HTTP controllers and Livewire v3 components without duplicating validation logic.
+Shared Laravel FormRequest base that works in both classic HTTP controllers and Livewire v3 components—one set of validation rules for both flows, including authorization and file uploads. Perfect for Laravel 10 / 11 / 12 projects that want to avoid duplicated Livewire validation logic.
+
+## Why use this?
+
+- Reuse one FormRequest in controllers, APIs, and Livewire v3 components.
+- Keep `rules`, `authorize`, `prepareForValidation`, `withValidator`, `messages`, and `attributes` in one place.
+- First-class Livewire support: file uploads (`WithFileUploads` / temporary files), authorization, custom error bags.
+- No config needed—drop it into any Laravel 10/11/12 + Livewire 3 app.
 
 ## Requirements
 
@@ -16,7 +23,7 @@ composer require maskow/livewire-combined-request
 
 No configuration or manual service provider registration is required.
 
-## Usage
+## Quick start
 
 ### 1) Create a reusable request
 
@@ -81,7 +88,7 @@ class ProfileRequest extends CombinedFormRequest
 
 You can keep using `prepareForValidation`, `messages`, `attributes`, and `passedValidation` as usual—these hooks run for both HTTP and Livewire flows.
 
-### 2) Use it in a controller
+### 2) Use it in a controller (HTTP/API)
 
 ```php
 use App\Http\Requests\ProfileRequest;
@@ -95,7 +102,7 @@ class ProfileController {
 }
 ```
 
-### 3) Use the same request in a Livewire component
+### 3) Use the same request in a Livewire component (Livewire validation)
 
 ```php
 use App\Http\Requests\ProfileRequest;
@@ -136,6 +143,14 @@ CombinedFormRequest::notifyAuthorizationUsing(function ($component, string $mess
 - Authorization is executed via your `authorize` method; denials are converted into a `ValidationException` on the `authorization` key (and optionally sent to your notifier).
 - The usual validator is created (`getValidatorInstance`), `withValidator` callbacks run, and on success the component’s error bag is cleared and the validated/mutated data is written back to the component via `fill`.
 - `validationData()` is overridden to feed the prepared Livewire payload to the validator, and `validated()` ensures validation is triggered even if you call it directly on the request.
+
+## FAQ
+
+- **Does it work with Livewire file uploads and temporary files?** Yes—use `WithFileUploads`; the request receives `TemporaryUploadedFile` instances and the `file` rule works as expected.
+- **Can I use it in API controllers?** Yes—type-hint your request in any controller (web or API); `validated()` returns the same data structure.
+- **Do `prepareForValidation`, `withValidator`, `messages`, and `attributes` run in Livewire?** Yes—identical to HTTP FormRequests.
+- **How do I handle authorization failures in Livewire?** Register a notifier via `CombinedFormRequest::notifyAuthorizationUsing(...)` if you want to display a custom message or toast.
+- **How do I run the test suite?** `composer install` then `composer test`.
 
 ## About
 

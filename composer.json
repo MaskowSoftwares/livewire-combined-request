@@ -33,13 +33,6 @@
         "livewire/livewire": "^3.0"
     },
     "license": "Apache-2.0",
-    "extra": {
-        "laravel": {
-            "providers": [
-                "Maskow\\CombinedRequest\\LivewireCombinedRequestServiceProvider"
-            ]
-        }
-    },
     "autoload-dev": {
         "psr-4": {
             "Maskow\\CombinedRequest\\Tests\\": "tests/"
