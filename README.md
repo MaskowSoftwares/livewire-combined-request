@@ -137,6 +137,10 @@ CombinedFormRequest::notifyAuthorizationUsing(function ($component, string $mess
 - The usual validator is created (`getValidatorInstance`), `withValidator` callbacks run, and on success the component’s error bag is cleared and the validated/mutated data is written back to the component via `fill`.
 - `validationData()` is overridden to feed the prepared Livewire payload to the validator, and `validated()` ensures validation is triggered even if you call it directly on the request.
 
+## About
+
+Built by Julius Maskow at [Software-Stratege.de](https://www.software-stratege.de).
+
 
 ## License
 
