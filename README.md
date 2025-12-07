@@ -152,6 +152,47 @@ CombinedFormRequest::notifyAuthorizationUsing(function ($component, string $mess
 - **How do I handle authorization failures in Livewire?** Register a notifier via `CombinedFormRequest::notifyAuthorizationUsing(...)` if you want to display a custom message or toast.
 - **How do I run the test suite?** `composer install` then `composer test`.
 
+## JavaScript scroll animations (aos-lite)
+
+This repository also ships a tiny, dependency-free animate-on-scroll helper inspired by AOS but tuned for Livewire/HTMX/Turbo-style DOM updates. The library auto-initializes when loaded in a browser, exposes a refresh hook for dynamic content, and ships both ESM and IIFE bundles plus a minified CSS file.
+
+### Install
+
+```bash
+npm install aos-lite
+```
+
+### Usage
+
+**Script tag:**
+
+```html
+<link rel="stylesheet" href="/dist/aos.css">
+<script src="/dist/aos.iife.js"></script>
+
+<div data-aos="fade-up">I will animate when visible</div>
+
+<script>
+  // already initialized automatically, but you can manually refresh after Livewire updates:
+  window.AOSLite.refresh();
+</script>
+```
+
+**ES modules:**
+
+```ts
+import { createAnimator } from "aos-lite";
+import "aos-lite/dist/aos.css";
+
+const animator = createAnimator({ once: false });
+animator.init();
+
+// Refresh after DOM mutations (e.g., Livewire partial updates)
+animator.refresh();
+```
+
+The CSS honors optional `data-aos-duration`, `data-aos-delay`, and `data-aos-easing` attributes per element. Supported animation names include `fade`, `fade-up`, `fade-down`, `fade-left`, `fade-right`, `zoom-in`, `zoom-out`, `slide-up`, and `slide-down`.
+
 ## About
 
 Built by Julius Maskow at [Software-Stratege.de](https://www.software-stratege.de).

@@ -1,0 +1,30 @@
+{
+  "name": "aos-lite",
+  "version": "0.1.0",
+  "description": "Lightweight animate-on-scroll library with Livewire-friendly refresh hooks.",
+  "main": "dist/aos.iife.js",
+  "module": "dist/aos.esm.js",
+  "type": "module",
+  "types": "dist/types/index.d.ts",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "types": "tsc --emitDeclarationOnly",
+    "clean": "rm -rf dist"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "aos",
+    "scroll",
+    "animation",
+    "intersection-observer",
+    "livewire"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.21.5",
+    "typescript": "^5.6.3"
+  }
+}
