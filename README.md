@@ -312,8 +312,6 @@ Missing required parameters throw descriptive exceptions:
 
 ### General Questions
 
-<<<<<<< Updated upstream
-=======
 **Q: Does it work with file uploads in Livewire?**
 A: Yes! Use `WithFileUploads` trait in your component. The request receives `TemporaryUploadedFile` instances and all file validation rules work as expected.
 
@@ -372,7 +370,6 @@ composer test
 
 Licensed under the Apache 2.0 license. See `LICENSE` for details.
 
->>>>>>> Stashed changes
 ## About
 
 Built by Julius Maskow at [Software-Stratege.de](https://www.software-stratege.de).
