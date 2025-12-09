@@ -20,29 +20,38 @@ abstract class CombinedFormRequest extends FormRequest {
     protected null|Component $livewireComponent = null;
     protected bool $runningLivewireValidation   = false;
     protected array $livewireData               = [];
+    protected array $requestParameters          = [];
+    
+    /** @var array Required parameters that must be provided */
+    protected array $requiredParameters = [];
 
     /** @var null|callable(Component, string): void */
     protected static $authorizationNotifier = null;
 
     /**
      * Build the request from a Livewire component without triggering the automatic HTTP validation pipeline.
+     *
+     * @param array $parameters Optional array of parameters to bind (e.g., ['team' => $team, 'workspace' => $workspace])
      */
-    public static function fromLivewire(Component $component): static {
+    public static function fromLivewire(Component $component, array $parameters = []): static {
         /** @var static $instance */
         $instance = static::createFrom(app(Request::class), new static);
 
         $instance->setContainer(app())
             ->setRedirector(app(Redirector::class))
-            ->usingLivewireComponent($component);
+            ->usingLivewireComponent($component)
+            ->withParameters($parameters);
 
         return $instance;
     }
 
     /**
      * Convenience helper to validate directly from a Livewire component.
+     *
+     * @param array $parameters Optional array of parameters to bind (e.g., ['team' => $team, 'workspace' => $workspace])
      */
-    public static function validateLivewire(Component $component): array {
-        return static::fromLivewire($component)->validateWithLivewire();
+    public static function validateLivewire(Component $component, array $parameters = []): array {
+        return static::fromLivewire($component, $parameters)->validateWithLivewire();
     }
 
     /**
@@ -56,6 +65,101 @@ abstract class CombinedFormRequest extends FormRequest {
         $this->livewireComponent = $component;
 
         return $this;
+    }
+
+    /**
+     * Set parameters for the request (models, values, etc.).
+     *
+     * @param array $parameters Array of parameters keyed by name (e.g., ['team' => $team, 'workspace' => $workspace])
+     */
+    public function withParameters(array $parameters): static {
+        $this->requestParameters = array_merge($this->requestParameters, $parameters);
+        
+        // Validate required parameters after setting them
+        $this->validateRequiredParameters();
+
+        return $this;
+    }
+
+    /**
+     * Set a single parameter.
+     */
+    public function withParameter(string $key, mixed $value): static {
+        $this->requestParameters[$key] = $value;
+        
+        return $this;
+    }
+
+    /**
+     * Get a parameter by key.
+     */
+    public function parameter(string $key, mixed $default = null): mixed {
+        // First check request parameters (Livewire)
+        if (array_key_exists($key, $this->requestParameters)) {
+            return $this->requestParameters[$key];
+        }
+        
+        // Then check route parameters (HTTP API)
+        $routeResult = parent::route($key, $default);
+        if ($routeResult !== $default) {
+            return $routeResult;
+        }
+        
+        return $default;
+    }
+
+    /**
+     * Check if a parameter exists.
+     */
+    public function hasParameter(string $key): bool {
+        return array_key_exists($key, $this->requestParameters) || parent::route($key) !== null;
+    }
+
+    /**
+     * Get all parameters.
+     */
+    public function parameters(): array {
+        return array_merge($this->requestParameters, parent::route() ?? []);
+    }
+
+    /**
+     * Validate that all required parameters are present.
+     *
+     * @throws \InvalidArgumentException
+     */
+    protected function validateRequiredParameters(): void {
+        if (empty($this->requiredParameters)) {
+            return;
+        }
+        
+        $missing = [];
+        
+        foreach ($this->requiredParameters as $param) {
+            if (!$this->hasParameter($param) || $this->parameter($param) === null) {
+                $missing[] = $param;
+            }
+        }
+        
+        if (!empty($missing)) {
+            $requestClass = static::class;
+            $missingParams = implode(', ', $missing);
+            
+            throw new InvalidArgumentException(
+                "Missing required parameters for {$requestClass}: {$missingParams}. "
+                . "Please provide these parameters when calling fromLivewire() or ensure they exist in the route."
+            );
+        }
+    }
+
+    /**
+     * Override route method for backward compatibility.
+     */
+    public function route($param = null, $default = null) {
+        if ($param === null) {
+            return parent::route($param, $default);
+        }
+        
+        return $this->parameter($param, $default);
     }
 
     /**
@@ -78,6 +182,9 @@ abstract class CombinedFormRequest extends FormRequest {
         $this->runningLivewireValidation = true;
 
         try {
+            // Validate required parameters are present
+            $this->validateRequiredParameters();
+            
             // Prepare the request data from Livewire component properties.
             $this->prepareLivewireValidationData();
 
@@ -171,7 +278,6 @@ abstract class CombinedFormRequest extends FormRequest {
     protected function separateFilesFromPayload(array $payload): array {
         $input = [];
         $files = [];
-
         foreach ($payload as $key => $value) {
             if ($value instanceof \Illuminate\Contracts\Support\Arrayable) {
                 $value = $value->toArray();
