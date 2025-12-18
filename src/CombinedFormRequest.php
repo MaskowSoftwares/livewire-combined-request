@@ -18,9 +18,9 @@ use Symfony\Component\HttpFoundation\File\UploadedFile as SymfonyUploadedFile;
  */
 abstract class CombinedFormRequest extends FormRequest {
     protected null|Component $livewireComponent = null;
-    protected bool $runningLivewireValidation   = false;
-    protected array $livewireData               = [];
-    protected array $requestParameters          = [];
+    private bool $runningLivewireValidation   = false;
+    private array $livewireData               = [];
+    private array $requestParameters          = [];
     
     /** @var array Required parameters that must be provided */
     protected array $requiredParameters = [];
