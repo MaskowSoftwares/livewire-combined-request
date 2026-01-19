@@ -1,6 +1,6 @@
 # Livewire Combined Request
 
-A powerful Laravel FormRequest base class that seamlessly works in both HTTP controllers and Livewire v3 components. Write your validation rules, authorization logic, and parameter requirements once—use them everywhere. Perfect for Laravel 10/11/12 projects that want to eliminate duplicated validation between APIs and Livewire components.
+A powerful Laravel FormRequest base class that seamlessly works in both HTTP controllers and Livewire v3/v4 components. Write your validation rules, authorization logic, and parameter requirements once—use them everywhere. Perfect for Laravel 10/11/12 projects that want to eliminate duplicated validation between APIs and Livewire components.
 
 ## Features
 
@@ -9,7 +9,7 @@ A powerful Laravel FormRequest base class that seamlessly works in both HTTP con
 - 🛡️ **Authorization**: Identical authorization logic across all contexts
 - 📁 **File Uploads**: Full support for Livewire file uploads and temporary files
 - 🎯 **Parameter Binding**: Elegant parameter system that works with route model binding and manual injection
-- 🚫 **Zero Configuration**: Drop it into any Laravel + Livewire 3 app
+- 🚫 **Zero Configuration**: Drop it into any Laravel + Livewire 3/4 app
 
 ## Why use this?
 
@@ -54,7 +54,7 @@ public function save() {
 
 - PHP 8.1+
 - Laravel 10 / 11 / 12
-- Livewire 3
+- Livewire 3 / 4
 
 ## Installation
 
@@ -300,6 +300,122 @@ Missing required parameters throw descriptive exceptions:
 //  Please provide these parameters when calling fromLivewire() or ensure they exist in the route."
 ```
 
+## Authorization Notifications
+
+When authorization fails in a Livewire context, you can register a global notifier to handle failures gracefully (e.g., show a toast notification):
+
+```php
+// In your AppServiceProvider boot() method:
+
+use Maskow\CombinedRequest\CombinedFormRequest;
+
+public function boot(): void
+{
+    CombinedFormRequest::notifyAuthorizationUsing(function ($component, string $message): void {
+        // Show a toast notification, flash message, or dispatch an event
+        Toast::error($component, 'Oops… Das hat nicht geklappt!', $message);
+        
+        // Or use Laravel's session flash:
+        // session()->flash('error', $message);
+        
+        // Or dispatch a browser event:
+        // $component->dispatch('notify', ['type' => 'error', 'message' => $message]);
+    });
+}
+```
+
+The callback receives the Livewire component instance and the authorization failure message, giving you full flexibility in how to notify the user.
+
+## FormRequest Hooks
+
+All standard Laravel FormRequest hooks work exactly the same in both HTTP and Livewire contexts:
+
+### prepareForValidation
+
+Mutate or normalize data before validation runs:
+
+```php
+class UpdateTeamRequest extends CombinedFormRequest
+{
+    protected function prepareForValidation(): void
+    {
+        // Normalize data before validation
+        $this->merge([
+            'slug' => Str::slug($this->name),
+            'email' => strtolower($this->email),
+        ]);
+        
+        // Set default values
+        if (! $this->has('is_public')) {
+            $this->merge(['is_public' => false]);
+        }
+    }
+}
+```
+
+### withValidator
+
+Add custom validation logic after the validator is created:
+
+```php
+class CreateProjectRequest extends CombinedFormRequest
+{
+    public function withValidator($validator): void
+    {
+        $validator->after(function ($validator) {
+            if ($this->hasExceededProjectLimit()) {
+                $validator->errors()->add('project', 'You have reached your project limit.');
+            }
+        });
+    }
+    
+    private function hasExceededProjectLimit(): bool
+    {
+        return $this->user()->projects()->count() >= 10;
+    }
+}
+```
+
+### passedValidation
+
+Perform actions after validation succeeds:
+
+```php
+class UploadDocumentRequest extends CombinedFormRequest
+{
+    protected function passedValidation(): void
+    {
+        // Log successful validation, track analytics, etc.
+        activity()->log('Document upload validated');
+    }
+}
+```
+
+### messages & attributes
+
+Customize error messages and attribute names:
+
+```php
+class UpdateTeamRequest extends CombinedFormRequest
+{
+    public function messages(): array
+    {
+        return [
+            'name.required' => 'Please enter a team name.',
+            'name.unique' => 'This team name is already taken.',
+        ];
+    }
+    
+    public function attributes(): array
+    {
+        return [
+            'is_public' => 'visibility setting',
+            'max_members' => 'maximum team size',
+        ];
+    }
+}
+```
+
 ## How it works (under the hood)
 
 - `ProfileRequest::validateLivewire($this)` builds a fake HTTP request from the component (`fromLivewire`), wiring the service container and redirector so the normal FormRequest pipeline can run.
@@ -327,7 +443,7 @@ A: They throw an `InvalidArgumentException` with a descriptive message listing e
 ### Authorization
 
 **Q: How do I handle authorization failures in Livewire?**
-A: Register a global notifier via `CombinedFormRequest::notifyAuthorizationUsing(...)` to handle authorization failures (e.g., show toast, flash message).
+A: Register a global notifier via `CombinedFormRequest::notifyAuthorizationUsing(...)`. See the [Authorization Notifications](#authorization-notifications) section for details.
 
 **Q: Does authorization work the same way in both contexts?**
 A: Yes! Your `authorize()` method runs identically. In HTTP it returns 403, in Livewire it throws a validation exception.
