@@ -475,12 +475,12 @@ abstract class CombinedFormRequest extends FormRequest {
         $errors = $validator->errors();
         $messages = $errors->messages();
         $convertedMessages = [];
+        $keysToRemove = [];
         
         foreach ($messages as $snakeKey => $errorMessages) {
-            // Check if this key was converted from camelCase
-            $camelKey = $this->camelToSnakeMap[$snakeKey] ?? $snakeKey;
+            $camelKey = $snakeKey;
             
-            // Handle nested keys (e.g., 'user.first_name' -> 'user.firstName')
+            // Handle nested keys (e.g., 'user_info.first_name' -> 'userInfo.firstName')
             if (str_contains($snakeKey, '.')) {
                 $parts = explode('.', $snakeKey);
                 $convertedParts = [];
@@ -490,24 +490,25 @@ abstract class CombinedFormRequest extends FormRequest {
                 }
                 
                 $camelKey = implode('.', $convertedParts);
+            } else {
+                // Check if this key was converted from camelCase
+                $camelKey = $this->camelToSnakeMap[$snakeKey] ?? $snakeKey;
             }
             
             $convertedMessages[$camelKey] = $errorMessages;
+            
+            // Track keys to remove if they were converted
+            if ($camelKey !== $snakeKey) {
+                $keysToRemove[] = $snakeKey;
+            }
         }
         
         // Replace the validator's error messages
         $errors->merge($convertedMessages);
         
         // Remove the snake_case keys that were converted
-        foreach ($messages as $snakeKey => $errorMessages) {
-            $camelKey = $this->camelToSnakeMap[$snakeKey] ?? null;
-            
-            if ($camelKey && $camelKey !== $snakeKey) {
-                // Remove the snake_case key
-                foreach ($errorMessages as $message) {
-                    $errors->forget($snakeKey);
-                }
-            }
+        foreach ($keysToRemove as $snakeKey) {
+            $errors->forget($snakeKey);
         }
     }
 
