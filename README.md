@@ -10,6 +10,7 @@ A powerful Laravel FormRequest base class that seamlessly works in both HTTP con
 - 📁 **File Uploads**: Full support for Livewire file uploads and temporary files
 - 🎯 **Parameter Binding**: Elegant parameter system that works with route model binding and manual injection
 - 🐫 **Smart Naming**: Optional automatic camelCase ↔ snake_case conversion for Livewire validation (disabled by default)
+- 💾 **Database Ready**: Optional snake_case validated data return for direct database operations
 - 🚫 **Zero Configuration**: Drop it into any Laravel + Livewire 3/4 app
 
 ## Why use this?
@@ -444,7 +445,9 @@ When enabled, the package automatically:
 1. **Converts property names**: Transforms camelCase component properties (e.g., `firstName`) to snake_case (e.g., `first_name`) before validation
 2. **Validates with snake_case rules**: Your validation rules can use Laravel's standard snake_case convention
 3. **Maps errors back**: Validation errors reference the original camelCase property names in your component
-4. **Returns camelCase data**: Validated data is converted back to camelCase for seamless integration with your component
+4. **Returns data**: Validated data is returned in the format you choose:
+   - **camelCase** (default): Converted back for seamless Livewire integration
+   - **snake_case** (optional): Kept in snake_case for direct database operations
 
 ### Example Usage
 
@@ -589,6 +592,77 @@ public function rules(): array
 // Errors will reference: 'userInfo.firstName', 'userInfo.lastName'
 ```
 
+### Returning Validated Data in snake_case
+
+By default, validated data is converted back to camelCase to match your Livewire component properties. However, if you need to pass the validated data directly to database operations (which typically use snake_case column names), you can keep the validated data in snake_case format:
+
+```php
+// In app/Providers/AppServiceProvider.php
+
+use Maskow\CombinedRequest\CombinedFormRequest;
+
+public function boot(): void
+{
+    // Enable conversion
+    CombinedFormRequest::convertCamelCaseToSnakeCase(true);
+    
+    // Keep validated data in snake_case for database operations
+    CombinedFormRequest::returnValidatedDataAsSnakeCase(true);
+}
+```
+
+**How it works:**
+
+```php
+// Livewire Component
+class ChangeEntryBoardModal extends Component
+{
+    public Entry $entry;
+    public $boardId;    // camelCase property
+    public $listId;     // camelCase property
+
+    public function updateBoard(): void
+    {
+        try {
+            // Validate and get data in snake_case
+            $data = UpdateEntryRequest::validateLivewire($this, ['entry' => $this->entry]);
+            
+            // $data now contains: ['board_id' => ..., 'list_id' => ...]
+            // Perfect for direct database operations!
+            $this->entry->update($data);
+            
+        } catch (ValidationException $e) {
+            // Errors still reference camelCase: 'boardId', 'listId'
+            throw $e;
+        }
+    }
+}
+
+// FormRequest
+class UpdateEntryRequest extends CombinedFormRequest
+{
+    public function rules(): array
+    {
+        return [
+            'board_id' => ['required', 'integer', 'exists:boards,id'],
+            'list_id'  => ['required', 'integer', 'exists:lists,id'],
+        ];
+    }
+}
+```
+
+**Important notes:**
+
+- **Validated data keys**: `board_id`, `list_id` (snake_case) - ready for database operations
+- **Validation errors**: `boardId`, `listId` (camelCase) - references component properties
+- **Component properties**: Still updated correctly via `fill()` using converted camelCase data
+- **Blade templates**: Use camelCase for `@error()` directives: `@error('boardId')`
+
+This setting only takes effect when `convertCamelCaseToSnakeCase` is also enabled. It's particularly useful when:
+- Your database columns use snake_case (Laravel convention)
+- You want to pass validated data directly to `Model::create()` or `Model::update()`
+- You want to avoid manual key conversion
+
 ### When to Use This Feature
 
 **Use it when:**
@@ -657,6 +731,18 @@ A: No, because it's disabled by default. When you enable it, only components tha
 
 **Q: Can I use both camelCase and snake_case rules in the same project?**
 A: Yes! The conversion is a global setting, but you can write rules that already match your property names. The conversion only affects keys that differ between camelCase and snake_case.
+
+**Q: Should I use `returnValidatedDataAsSnakeCase(true)` for database operations?**
+A: Yes, if you want to pass validated data directly to Eloquent methods like `create()` or `update()` without manual key conversion. When enabled, validated data keys match your database column names (snake_case), while errors still reference your Livewire component properties (camelCase).
+
+**Q: What's the difference between the validated data format and error format?**
+A: With `returnValidatedDataAsSnakeCase(true)`:
+- **Validated data**: `['board_id' => 1, 'list_id' => 2]` (snake_case for database)
+- **Validation errors**: `['boardId' => ['error'], 'listId' => ['error']]` (camelCase for component)
+This allows direct database usage while maintaining proper error references in your Blade templates.
+
+**Q: Do I need both settings enabled for database operations?**
+A: Yes. You need `convertCamelCaseToSnakeCase(true)` to enable the conversion system, and `returnValidatedDataAsSnakeCase(true)` to keep the validated data in snake_case format. Without the first setting, no conversion happens at all.
 
 ## How it works
 
