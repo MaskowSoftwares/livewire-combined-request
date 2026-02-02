@@ -9,6 +9,7 @@ A powerful Laravel FormRequest base class that seamlessly works in both HTTP con
 - 🛡️ **Authorization**: Identical authorization logic across all contexts
 - 📁 **File Uploads**: Full support for Livewire file uploads and temporary files
 - 🎯 **Parameter Binding**: Elegant parameter system that works with route model binding and manual injection
+- 🐫 **Smart Naming**: Optional automatic camelCase ↔ snake_case conversion for Livewire validation (disabled by default)
 - 🚫 **Zero Configuration**: Drop it into any Laravel + Livewire 3/4 app
 
 ## Why use this?
@@ -416,6 +417,190 @@ class UpdateTeamRequest extends CombinedFormRequest
 }
 ```
 
+## CamelCase to snake_case Conversion
+
+Laravel validation rules follow snake_case naming conventions (e.g., `first_name`, `email_address`), while Livewire components typically use camelCase for public properties (e.g., `firstName`, `emailAddress`). This package provides an optional feature to automatically bridge this gap.
+
+### Enabling the Conversion
+
+By default, this feature is **disabled** to maintain backward compatibility. Enable it globally in your `AppServiceProvider`:
+
+```php
+// In app/Providers/AppServiceProvider.php
+
+use Maskow\CombinedRequest\CombinedFormRequest;
+
+public function boot(): void
+{
+    // Enable automatic camelCase to snake_case conversion
+    CombinedFormRequest::convertCamelCaseToSnakeCase(true);
+}
+```
+
+### How It Works
+
+When enabled, the package automatically:
+
+1. **Converts property names**: Transforms camelCase component properties (e.g., `firstName`) to snake_case (e.g., `first_name`) before validation
+2. **Validates with snake_case rules**: Your validation rules can use Laravel's standard snake_case convention
+3. **Maps errors back**: Validation errors reference the original camelCase property names in your component
+4. **Returns camelCase data**: Validated data is converted back to camelCase for seamless integration with your component
+
+### Example Usage
+
+**Livewire Component:**
+```php
+<?php
+
+namespace App\Livewire;
+
+use App\Http\Requests\UpdateUserProfileRequest;
+use Livewire\Component;
+
+class EditProfile extends Component
+{
+    // Component properties use camelCase (Livewire convention)
+    public string $firstName = '';
+    public string $lastName = '';
+    public string $emailAddress = '';
+    public bool $isSubscribed = false;
+
+    public function save()
+    {
+        // Validation happens automatically with snake_case rules
+        $validated = UpdateUserProfileRequest::validateLivewire($this);
+        
+        // $validated contains camelCase keys matching your properties
+        auth()->user()->update($validated);
+        
+        session()->flash('message', 'Profile updated!');
+    }
+
+    public function render()
+    {
+        return view('livewire.edit-profile');
+    }
+}
+```
+
+**FormRequest with snake_case rules:**
+```php
+<?php
+
+namespace App\Http\Requests;
+
+use Illuminate\Auth\Access\Response;
+use Maskow\CombinedRequest\CombinedFormRequest;
+
+class UpdateUserProfileRequest extends CombinedFormRequest
+{
+    public function authorize(): bool|Response
+    {
+        return Response::allow();
+    }
+
+    public function rules(): array
+    {
+        // Rules use snake_case (Laravel convention)
+        return [
+            'first_name'    => ['required', 'string', 'max:255'],
+            'last_name'     => ['required', 'string', 'max:255'],
+            'email_address' => ['required', 'email', 'max:255'],
+            'is_subscribed' => ['boolean'],
+        ];
+    }
+    
+    public function messages(): array
+    {
+        return [
+            'first_name.required'    => 'Please enter your first name.',
+            'email_address.required' => 'Please enter your email address.',
+            'email_address.email'    => 'Please enter a valid email address.',
+        ];
+    }
+}
+```
+
+**Blade Template:**
+```blade
+<div>
+    <form wire:submit="save">
+        <div>
+            <label>First Name</label>
+            <input wire:model="firstName" type="text">
+            {{-- Error references camelCase property name --}}
+            @error('firstName') <span class="error">{{ $message }}</span> @enderror
+        </div>
+
+        <div>
+            <label>Last Name</label>
+            <input wire:model="lastName" type="text">
+            @error('lastName') <span class="error">{{ $message }}</span> @enderror
+        </div>
+
+        <div>
+            <label>Email</label>
+            <input wire:model="emailAddress" type="email">
+            @error('emailAddress') <span class="error">{{ $message }}</span> @enderror
+        </div>
+
+        <div>
+            <label>
+                <input wire:model="isSubscribed" type="checkbox">
+                Subscribe to newsletter
+            </label>
+            @error('isSubscribed') <span class="error">{{ $message }}</span> @enderror
+        </div>
+
+        <button type="submit">Save Profile</button>
+    </form>
+</div>
+```
+
+### Benefits
+
+- **Follow Laravel conventions**: Write validation rules in snake_case as Laravel recommends
+- **Keep Livewire conventions**: Use camelCase for component properties as Livewire expects
+- **Seamless error handling**: Errors automatically reference your camelCase property names
+- **No manual mapping**: The conversion happens automatically in both directions
+- **Backward compatible**: Disabled by default, so existing code continues to work
+
+### Nested Data Support
+
+The conversion also works with nested arrays:
+
+```php
+// Component property
+public array $userInfo = [
+    'firstName' => 'John',
+    'lastName' => 'Doe',
+];
+
+// Validation rules (snake_case)
+public function rules(): array
+{
+    return [
+        'user_info'            => ['required', 'array'],
+        'user_info.first_name' => ['required', 'string'],
+        'user_info.last_name'  => ['required', 'string'],
+    ];
+}
+
+// Errors will reference: 'userInfo.firstName', 'userInfo.lastName'
+```
+
+### When to Use This Feature
+
+**Use it when:**
+- You want to follow Laravel's snake_case convention for validation rules
+- Your Livewire components use camelCase properties (common practice)
+- You want consistency across your validation rules (API and Livewire)
+
+**Don't use it when:**
+- Your validation rules already match your property names
+- You prefer explicit control over naming in each component
+- You have a specific reason to use different naming conventions
+
 ## How it works (under the hood)
 
 - `ProfileRequest::validateLivewire($this)` builds a fake HTTP request from the component (`fromLivewire`), wiring the service container and redirector so the normal FormRequest pipeline can run.
@@ -458,6 +643,20 @@ A: Yes! HTTP requests use route model binding, Livewire uses manual injection. B
 
 **Q: What types of values can be parameters?**
 A: Anything! Models, primitive values, arrays, objects—the parameter system is completely flexible.
+
+### CamelCase Conversion
+
+**Q: Should I enable camelCase to snake_case conversion?**
+A: It depends on your preferences. Enable it if you want to write validation rules in Laravel's standard snake_case convention while keeping camelCase properties in your Livewire components. Leave it disabled if your rules already match your property names.
+
+**Q: Does the conversion affect HTTP/API validation?**
+A: No, the conversion only applies to Livewire validation. HTTP and API requests continue to work normally.
+
+**Q: Will enabling this break my existing Livewire components?**
+A: No, because it's disabled by default. When you enable it, only components that use the FormRequest with snake_case rules will benefit. Components with matching property and rule names continue to work as before.
+
+**Q: Can I use both camelCase and snake_case rules in the same project?**
+A: Yes! The conversion is a global setting, but you can write rules that already match your property names. The conversion only affects keys that differ between camelCase and snake_case.
 
 ## How it works
 
