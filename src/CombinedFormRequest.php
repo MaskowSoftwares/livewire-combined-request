@@ -8,6 +8,7 @@ use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Redirector;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use Livewire\Component;
@@ -21,12 +22,16 @@ abstract class CombinedFormRequest extends FormRequest {
     private bool $runningLivewireValidation   = false;
     private array $livewireData               = [];
     private array $requestParameters          = [];
+    private array $camelToSnakeMap            = [];
     
     /** @var array Required parameters that must be provided */
     protected array $requiredParameters = [];
 
     /** @var null|callable(Component, string): void */
     protected static $authorizationNotifier = null;
+
+    /** @var bool Global setting to enable automatic camelCase to snake_case conversion for Livewire validation */
+    protected static bool $convertCamelCaseToSnakeCase = false;
 
     /**
      * Build the request from a Livewire component without triggering the automatic HTTP validation pipeline.
@@ -59,6 +64,26 @@ abstract class CombinedFormRequest extends FormRequest {
      */
     public static function notifyAuthorizationUsing(null|callable $callback): void {
         static::$authorizationNotifier = $callback;
+    }
+
+    /**
+     * Enable or disable automatic camelCase to snake_case conversion for Livewire validation.
+     * 
+     * When enabled, Livewire component properties in camelCase (e.g., 'listId', 'userName')
+     * will be automatically converted to snake_case (e.g., 'list_id', 'user_name') for validation.
+     * Validation errors will still reference the original camelCase property names.
+     * 
+     * @param bool $enabled Whether to enable the conversion (default: false)
+     */
+    public static function convertCamelCaseToSnakeCase(bool $enabled = true): void {
+        static::$convertCamelCaseToSnakeCase = $enabled;
+    }
+
+    /**
+     * Check if camelCase to snake_case conversion is enabled.
+     */
+    public static function isCamelCaseConversionEnabled(): bool {
+        return static::$convertCamelCaseToSnakeCase;
     }
 
     public function usingLivewireComponent(Component $component): static {
@@ -200,6 +225,11 @@ abstract class CombinedFormRequest extends FormRequest {
 
             $validated = $this->validator->validated();
 
+            // Convert validated data keys back to camelCase if conversion was enabled
+            if (static::$convertCamelCaseToSnakeCase && !empty($this->camelToSnakeMap)) {
+                $validated = $this->convertValidatedDataToCamelCase($validated);
+            }
+
             // Mirror Livewire's built-in validation behavior: clear old errors on success.
             $this->livewireComponent->resetErrorBag();
 
@@ -218,6 +248,11 @@ abstract class CombinedFormRequest extends FormRequest {
     protected function prepareLivewireValidationData(): void {
         // Start with a fresh copy of the Livewire component's public properties.
         $this->livewireData = $this->livewireComponent->all();
+
+        // Convert camelCase keys to snake_case if enabled
+        if (static::$convertCamelCaseToSnakeCase) {
+            $this->livewireData = $this->convertKeysToSnakeCase($this->livewireData);
+        }
 
         // Separate uploaded files from the rest of the payload.
         [$input, $files] = $this->separateFilesFromPayload($this->livewireData);
@@ -308,6 +343,34 @@ abstract class CombinedFormRequest extends FormRequest {
         return [$input, $files];
     }
 
+    /**
+     * Convert array keys from camelCase to snake_case and track the mapping.
+     *
+     * @param array $data The data array with camelCase keys
+     * @return array The data array with snake_case keys
+     */
+    protected function convertKeysToSnakeCase(array $data): array {
+        $converted = [];
+        
+        foreach ($data as $key => $value) {
+            $snakeKey = Str::snake($key);
+            
+            // Track the mapping from snake_case to camelCase
+            if ($snakeKey !== $key) {
+                $this->camelToSnakeMap[$snakeKey] = $key;
+            }
+            
+            // Recursively convert nested arrays
+            if (is_array($value)) {
+                $value = $this->convertKeysToSnakeCase($value);
+            }
+            
+            $converted[$snakeKey] = $value;
+        }
+        
+        return $converted;
+    }
+
     public function validationData(): array {
         if ($this->runningLivewireValidation) {
             return $this->livewireData;
@@ -363,6 +426,11 @@ abstract class CombinedFormRequest extends FormRequest {
 
     protected function failedValidation(Validator $validator) {
         if ($this->runningLivewireValidation) {
+            // Convert validation error keys back to camelCase if conversion was enabled
+            if (static::$convertCamelCaseToSnakeCase && !empty($this->camelToSnakeMap)) {
+                $this->convertValidationErrorsToCamelCase($validator);
+            }
+            
             throw (new ValidationException($validator))->errorBag($this->errorBag);
         }
 
@@ -397,6 +465,72 @@ abstract class CombinedFormRequest extends FormRequest {
         }
 
         call_user_func(static::$authorizationNotifier, $this->livewireComponent, $message);
+    }
+
+    /**
+     * Convert validation error keys from snake_case back to camelCase.
+     * This ensures error messages reference the original property names in the Livewire component.
+     */
+    protected function convertValidationErrorsToCamelCase(Validator $validator): void {
+        $errors = $validator->errors();
+        $messages = $errors->messages();
+        $convertedMessages = [];
+        
+        foreach ($messages as $snakeKey => $errorMessages) {
+            // Check if this key was converted from camelCase
+            $camelKey = $this->camelToSnakeMap[$snakeKey] ?? $snakeKey;
+            
+            // Handle nested keys (e.g., 'user.first_name' -> 'user.firstName')
+            if (str_contains($snakeKey, '.')) {
+                $parts = explode('.', $snakeKey);
+                $convertedParts = [];
+                
+                foreach ($parts as $part) {
+                    $convertedParts[] = $this->camelToSnakeMap[$part] ?? $part;
+                }
+                
+                $camelKey = implode('.', $convertedParts);
+            }
+            
+            $convertedMessages[$camelKey] = $errorMessages;
+        }
+        
+        // Replace the validator's error messages
+        $errors->merge($convertedMessages);
+        
+        // Remove the snake_case keys that were converted
+        foreach ($messages as $snakeKey => $errorMessages) {
+            $camelKey = $this->camelToSnakeMap[$snakeKey] ?? null;
+            
+            if ($camelKey && $camelKey !== $snakeKey) {
+                // Remove the snake_case key
+                foreach ($errorMessages as $message) {
+                    $errors->forget($snakeKey);
+                }
+            }
+        }
+    }
+
+    /**
+     * Convert validated data keys from snake_case back to camelCase.
+     * This ensures the data can be properly filled back into the Livewire component.
+     */
+    protected function convertValidatedDataToCamelCase(array $data): array {
+        $converted = [];
+        
+        foreach ($data as $snakeKey => $value) {
+            // Get the original camelCase key
+            $camelKey = $this->camelToSnakeMap[$snakeKey] ?? $snakeKey;
+            
+            // Recursively convert nested arrays
+            if (is_array($value)) {
+                $value = $this->convertValidatedDataToCamelCase($value);
+            }
+            
+            $converted[$camelKey] = $value;
+        }
+        
+        return $converted;
     }
 
     /**
