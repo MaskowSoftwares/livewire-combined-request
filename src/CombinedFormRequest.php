@@ -33,6 +33,9 @@ abstract class CombinedFormRequest extends FormRequest {
     /** @var bool Global setting to enable automatic camelCase to snake_case conversion for Livewire validation */
     protected static bool $convertCamelCaseToSnakeCase = false;
 
+    /** @var bool Global setting to return validated data in snake_case format (useful for database operations) */
+    protected static bool $returnValidatedDataAsSnakeCase = false;
+
     /**
      * Build the request from a Livewire component without triggering the automatic HTTP validation pipeline.
      *
@@ -84,6 +87,28 @@ abstract class CombinedFormRequest extends FormRequest {
      */
     public static function isCamelCaseConversionEnabled(): bool {
         return static::$convertCamelCaseToSnakeCase;
+    }
+
+    /**
+     * Configure whether validated data should be returned in snake_case format.
+     * 
+     * When enabled along with camelCase conversion, validated data will remain in snake_case
+     * format (e.g., 'board_id', 'list_id') which is useful for direct database operations.
+     * Validation errors will still reference camelCase property names (e.g., 'boardId', 'listId').
+     * 
+     * This setting only takes effect when convertCamelCaseToSnakeCase is also enabled.
+     * 
+     * @param bool $enabled Whether to return validated data in snake_case (default: false)
+     */
+    public static function returnValidatedDataAsSnakeCase(bool $enabled = true): void {
+        static::$returnValidatedDataAsSnakeCase = $enabled;
+    }
+
+    /**
+     * Check if validated data should be returned in snake_case format.
+     */
+    public static function isReturnValidatedDataAsSnakeCaseEnabled(): bool {
+        return static::$returnValidatedDataAsSnakeCase;
     }
 
     public function usingLivewireComponent(Component $component): static {
@@ -226,15 +251,27 @@ abstract class CombinedFormRequest extends FormRequest {
             $validated = $this->validator->validated();
 
             // Convert validated data keys back to camelCase if conversion was enabled
+            // UNLESS the user wants to keep it in snake_case for database operations
             if (static::$convertCamelCaseToSnakeCase && !empty($this->camelToSnakeMap)) {
-                $validated = $this->convertValidatedDataToCamelCase($validated);
+                if (!static::$returnValidatedDataAsSnakeCase) {
+                    // Default behavior: convert back to camelCase for Livewire component
+                    $validated = $this->convertValidatedDataToCamelCase($validated);
+                }
+                // If returnValidatedDataAsSnakeCase is true, keep validated data in snake_case
             }
 
             // Mirror Livewire's built-in validation behavior: clear old errors on success.
             $this->livewireComponent->resetErrorBag();
 
             // Keep Livewire state in sync with any prepared/mutated values.
-            $this->livewireComponent->fill($validated);
+            // Only fill if data was converted back to camelCase
+            if (!static::$returnValidatedDataAsSnakeCase || !static::$convertCamelCaseToSnakeCase) {
+                $this->livewireComponent->fill($validated);
+            } else {
+                // If data is in snake_case, convert it to camelCase just for filling the component
+                $camelCaseData = $this->convertValidatedDataToCamelCase($validated);
+                $this->livewireComponent->fill($camelCaseData);
+            }
 
             return $validated;
         } finally {

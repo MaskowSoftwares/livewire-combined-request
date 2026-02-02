@@ -22,8 +22,9 @@ class CamelCaseConversionTest extends TestCase
 
     protected function tearDown(): void
     {
-        // Reset the conversion setting after each test
+        // Reset the conversion settings after each test
         CombinedFormRequest::convertCamelCaseToSnakeCase(false);
+        CombinedFormRequest::returnValidatedDataAsSnakeCase(false);
 
         parent::tearDown();
     }
@@ -130,6 +131,93 @@ class CamelCaseConversionTest extends TestCase
         $this->assertIsArray($validated['userInfo']);
         $this->assertArrayHasKey('firstName', $validated['userInfo']);
         $this->assertArrayHasKey('lastName', $validated['userInfo']);
+    }
+
+    public function test_validated_data_can_be_returned_as_snake_case(): void
+    {
+        CombinedFormRequest::convertCamelCaseToSnakeCase(true);
+        CombinedFormRequest::returnValidatedDataAsSnakeCase(true);
+
+        $component = Livewire::test(Fixtures\CamelCaseComponent::class)
+            ->set('firstName', 'John')
+            ->set('lastName', 'Doe')
+            ->set('emailAddress', 'john@example.com')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $validated = $component->instance()->lastValidated;
+
+        // The validated data should be in snake_case (for database operations)
+        $this->assertArrayHasKey('first_name', $validated);
+        $this->assertArrayHasKey('last_name', $validated);
+        $this->assertArrayHasKey('email_address', $validated);
+        $this->assertArrayNotHasKey('firstName', $validated);
+        $this->assertArrayNotHasKey('lastName', $validated);
+        $this->assertArrayNotHasKey('emailAddress', $validated);
+        
+        // Verify values are correct
+        $this->assertSame('John', $validated['first_name']);
+        $this->assertSame('Doe', $validated['last_name']);
+        $this->assertSame('john@example.com', $validated['email_address']);
+
+        // Component properties should still be updated with camelCase
+        $this->assertSame('John', $component->instance()->firstName);
+        $this->assertSame('Doe', $component->instance()->lastName);
+        $this->assertSame('john@example.com', $component->instance()->emailAddress);
+    }
+
+    public function test_errors_remain_camel_case_even_when_validated_data_is_snake_case(): void
+    {
+        CombinedFormRequest::convertCamelCaseToSnakeCase(true);
+        CombinedFormRequest::returnValidatedDataAsSnakeCase(true);
+
+        $component = Livewire::test(Fixtures\CamelCaseComponent::class)
+            ->set('firstName', '') // Invalid: required
+            ->set('lastName', 'Doe')
+            ->set('emailAddress', 'invalid-email') // Invalid: not an email
+            ->call('save')
+            ->assertHasErrors(['firstName', 'emailAddress']);
+
+        // Errors must still reference the camelCase property names
+        $errors = $component->instance()->getErrorBag();
+        $this->assertTrue($errors->has('firstName'));
+        $this->assertTrue($errors->has('emailAddress'));
+        $this->assertFalse($errors->has('first_name')); // Should NOT have snake_case key
+        $this->assertFalse($errors->has('email_address')); // Should NOT have snake_case key
+    }
+
+    public function test_snake_case_validated_data_option_is_disabled_by_default(): void
+    {
+        $this->assertFalse(CombinedFormRequest::isReturnValidatedDataAsSnakeCaseEnabled());
+    }
+
+    public function test_snake_case_validated_data_can_be_enabled(): void
+    {
+        CombinedFormRequest::returnValidatedDataAsSnakeCase(true);
+        $this->assertTrue(CombinedFormRequest::isReturnValidatedDataAsSnakeCaseEnabled());
+
+        CombinedFormRequest::returnValidatedDataAsSnakeCase(false);
+        $this->assertFalse(CombinedFormRequest::isReturnValidatedDataAsSnakeCaseEnabled());
+    }
+
+    public function test_validated_data_remains_camel_case_when_snake_case_option_disabled(): void
+    {
+        CombinedFormRequest::convertCamelCaseToSnakeCase(true);
+        CombinedFormRequest::returnValidatedDataAsSnakeCase(false); // Explicitly disabled
+
+        $component = Livewire::test(Fixtures\CamelCaseComponent::class)
+            ->set('firstName', 'Jane')
+            ->set('lastName', 'Smith')
+            ->set('emailAddress', 'jane@example.com')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $validated = $component->instance()->lastValidated;
+
+        // Should be in camelCase (default behavior)
+        $this->assertArrayHasKey('firstName', $validated);
+        $this->assertArrayHasKey('lastName', $validated);
+        $this->assertArrayHasKey('emailAddress', $validated);
     }
 }
 
