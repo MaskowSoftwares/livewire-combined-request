@@ -8,6 +8,7 @@ use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Redirector;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use Livewire\Component;
@@ -18,20 +19,27 @@ use Symfony\Component\HttpFoundation\File\UploadedFile as SymfonyUploadedFile;
  */
 abstract class CombinedFormRequest extends FormRequest {
     protected null|Component $livewireComponent = null;
-    private bool $runningLivewireValidation   = false;
-    private array $livewireData               = [];
-    private array $requestParameters          = [];
-    
+    private bool $runningLivewireValidation     = false;
+    private array $livewireData                 = [];
+    private array $requestParameters            = [];
+    private array $camelToSnakeMap              = [];
+
     /** @var array Required parameters that must be provided */
     protected array $requiredParameters = [];
 
     /** @var null|callable(Component, string): void */
     protected static $authorizationNotifier = null;
 
+    /** @var bool Global setting to enable automatic camelCase to snake_case conversion for Livewire validation */
+    protected static bool $convertCamelCaseToSnakeCase = false;
+
+    /** @var bool Global setting to return validated data in snake_case format (useful for database operations) */
+    protected static bool $returnValidatedDataAsSnakeCase = false;
+
     /**
      * Build the request from a Livewire component without triggering the automatic HTTP validation pipeline.
      *
-     * @param array $parameters Optional array of parameters to bind (e.g., ['team' => $team, 'workspace' => $workspace])
+     * @param  array  $parameters  Optional array of parameters to bind (e.g., ['team' => $team, 'workspace' => $workspace])
      */
     public static function fromLivewire(Component $component, array $parameters = []): static {
         /** @var static $instance */
@@ -48,7 +56,7 @@ abstract class CombinedFormRequest extends FormRequest {
     /**
      * Convenience helper to validate directly from a Livewire component.
      *
-     * @param array $parameters Optional array of parameters to bind (e.g., ['team' => $team, 'workspace' => $workspace])
+     * @param  array  $parameters  Optional array of parameters to bind (e.g., ['team' => $team, 'workspace' => $workspace])
      */
     public static function validateLivewire(Component $component, array $parameters = []): array {
         return static::fromLivewire($component, $parameters)->validateWithLivewire();
@@ -61,6 +69,48 @@ abstract class CombinedFormRequest extends FormRequest {
         static::$authorizationNotifier = $callback;
     }
 
+    /**
+     * Enable or disable automatic camelCase to snake_case conversion for Livewire validation.
+     *
+     * When enabled, Livewire component properties in camelCase (e.g., 'listId', 'userName')
+     * will be automatically converted to snake_case (e.g., 'list_id', 'user_name') for validation.
+     * Validation errors will still reference the original camelCase property names.
+     *
+     * @param  bool  $enabled  Whether to enable the conversion (default: false)
+     */
+    public static function convertCamelCaseToSnakeCase(bool $enabled = true): void {
+        static::$convertCamelCaseToSnakeCase = $enabled;
+    }
+
+    /**
+     * Check if camelCase to snake_case conversion is enabled.
+     */
+    public static function isCamelCaseConversionEnabled(): bool {
+        return static::$convertCamelCaseToSnakeCase;
+    }
+
+    /**
+     * Configure whether validated data should be returned in snake_case format.
+     *
+     * When enabled along with camelCase conversion, validated data will remain in snake_case
+     * format (e.g., 'board_id', 'list_id') which is useful for direct database operations.
+     * Validation errors will still reference camelCase property names (e.g., 'boardId', 'listId').
+     *
+     * This setting only takes effect when convertCamelCaseToSnakeCase is also enabled.
+     *
+     * @param  bool  $enabled  Whether to return validated data in snake_case (default: false)
+     */
+    public static function returnValidatedDataAsSnakeCase(bool $enabled = true): void {
+        static::$returnValidatedDataAsSnakeCase = $enabled;
+    }
+
+    /**
+     * Check if validated data should be returned in snake_case format.
+     */
+    public static function isReturnValidatedDataAsSnakeCaseEnabled(): bool {
+        return static::$returnValidatedDataAsSnakeCase;
+    }
+
     public function usingLivewireComponent(Component $component): static {
         $this->livewireComponent = $component;
 
@@ -70,11 +120,11 @@ abstract class CombinedFormRequest extends FormRequest {
     /**
      * Set parameters for the request (models, values, etc.).
      *
-     * @param array $parameters Array of parameters keyed by name (e.g., ['team' => $team, 'workspace' => $workspace])
+     * @param  array  $parameters  Array of parameters keyed by name (e.g., ['team' => $team, 'workspace' => $workspace])
      */
     public function withParameters(array $parameters): static {
         $this->requestParameters = array_merge($this->requestParameters, $parameters);
-        
+
         // Validate required parameters after setting them
         $this->validateRequiredParameters();
 
@@ -86,7 +136,7 @@ abstract class CombinedFormRequest extends FormRequest {
      */
     public function withParameter(string $key, mixed $value): static {
         $this->requestParameters[$key] = $value;
-        
+
         return $this;
     }
 
@@ -98,13 +148,14 @@ abstract class CombinedFormRequest extends FormRequest {
         if (array_key_exists($key, $this->requestParameters)) {
             return $this->requestParameters[$key];
         }
-        
+
         // Then check route parameters (HTTP API)
         $routeResult = parent::route($key, $default);
+
         if ($routeResult !== $default) {
             return $routeResult;
         }
-        
+
         return $default;
     }
 
@@ -119,7 +170,7 @@ abstract class CombinedFormRequest extends FormRequest {
      * Get all parameters.
      */
     public function parameters(): array {
-        return array_merge($this->requestParameters, parent::route() ?? []);
+        return array_merge($this->requestParameters, parent::route()?->parameters() ?? []);
     }
 
     /**
@@ -131,34 +182,37 @@ abstract class CombinedFormRequest extends FormRequest {
         if (empty($this->requiredParameters)) {
             return;
         }
-        
+
         $missing = [];
-        
+
         foreach ($this->requiredParameters as $param) {
-            if (!$this->hasParameter($param) || $this->parameter($param) === null) {
+            if (! $this->hasParameter($param) || $this->parameter($param) === null) {
                 $missing[] = $param;
             }
         }
-        
-        if (!empty($missing)) {
-            $requestClass = static::class;
+
+        if (! empty($missing)) {
+            $requestClass  = static::class;
             $missingParams = implode(', ', $missing);
-            
+
             throw new InvalidArgumentException(
                 "Missing required parameters for {$requestClass}: {$missingParams}. "
-                . "Please provide these parameters when calling fromLivewire() or ensure they exist in the route."
+                .'Please provide these parameters when calling fromLivewire() or ensure they exist in the route.'
             );
         }
     }
 
     /**
      * Override route method for backward compatibility.
+     *
+     * @param  null|mixed  $param
+     * @param  null|mixed  $default
      */
     public function route($param = null, $default = null) {
         if ($param === null) {
             return parent::route($param, $default);
         }
-        
+
         return $this->parameter($param, $default);
     }
 
@@ -184,7 +238,7 @@ abstract class CombinedFormRequest extends FormRequest {
         try {
             // Validate required parameters are present
             $this->validateRequiredParameters();
-            
+
             // Prepare the request data from Livewire component properties.
             $this->prepareLivewireValidationData();
 
@@ -200,11 +254,28 @@ abstract class CombinedFormRequest extends FormRequest {
 
             $validated = $this->validator->validated();
 
+            // Convert validated data keys back to camelCase if conversion was enabled
+            // UNLESS the user wants to keep it in snake_case for database operations
+            if (static::$convertCamelCaseToSnakeCase && ! empty($this->camelToSnakeMap)) {
+                if (! static::$returnValidatedDataAsSnakeCase) {
+                    // Default behavior: convert back to camelCase for Livewire component
+                    $validated = $this->convertValidatedDataToCamelCase($validated);
+                }
+                // If returnValidatedDataAsSnakeCase is true, keep validated data in snake_case
+            }
+
             // Mirror Livewire's built-in validation behavior: clear old errors on success.
             $this->livewireComponent->resetErrorBag();
 
             // Keep Livewire state in sync with any prepared/mutated values.
-            $this->livewireComponent->fill($validated);
+            // Only fill if data was converted back to camelCase
+            if (! static::$returnValidatedDataAsSnakeCase || ! static::$convertCamelCaseToSnakeCase) {
+                $this->livewireComponent->fill($validated);
+            } else {
+                // If data is in snake_case, convert it to camelCase just for filling the component
+                $camelCaseData = $this->convertValidatedDataToCamelCase($validated);
+                $this->livewireComponent->fill($camelCaseData);
+            }
 
             return $validated;
         } finally {
@@ -218,6 +289,11 @@ abstract class CombinedFormRequest extends FormRequest {
     protected function prepareLivewireValidationData(): void {
         // Start with a fresh copy of the Livewire component's public properties.
         $this->livewireData = $this->livewireComponent->all();
+
+        // Convert camelCase keys to snake_case if enabled
+        if (static::$convertCamelCaseToSnakeCase) {
+            $this->livewireData = $this->convertKeysToSnakeCase($this->livewireData);
+        }
 
         // Separate uploaded files from the rest of the payload.
         [$input, $files] = $this->separateFilesFromPayload($this->livewireData);
@@ -308,6 +384,34 @@ abstract class CombinedFormRequest extends FormRequest {
         return [$input, $files];
     }
 
+    /**
+     * Convert array keys from camelCase to snake_case and track the mapping.
+     *
+     * @param  array  $data  The data array with camelCase keys
+     * @return array The data array with snake_case keys
+     */
+    protected function convertKeysToSnakeCase(array $data): array {
+        $converted = [];
+
+        foreach ($data as $key => $value) {
+            $snakeKey = Str::snake($key);
+
+            // Track the mapping from snake_case to camelCase
+            if ($snakeKey !== $key) {
+                $this->camelToSnakeMap[$snakeKey] = $key;
+            }
+
+            // Recursively convert nested arrays
+            if (is_array($value)) {
+                $value = $this->convertKeysToSnakeCase($value);
+            }
+
+            $converted[$snakeKey] = $value;
+        }
+
+        return $converted;
+    }
+
     public function validationData(): array {
         if ($this->runningLivewireValidation) {
             return $this->livewireData;
@@ -363,6 +467,11 @@ abstract class CombinedFormRequest extends FormRequest {
 
     protected function failedValidation(Validator $validator) {
         if ($this->runningLivewireValidation) {
+            // Convert validation error keys back to camelCase if conversion was enabled
+            if (static::$convertCamelCaseToSnakeCase && ! empty($this->camelToSnakeMap)) {
+                $this->convertValidationErrorsToCamelCase($validator);
+            }
+
             throw (new ValidationException($validator))->errorBag($this->errorBag);
         }
 
@@ -397,6 +506,73 @@ abstract class CombinedFormRequest extends FormRequest {
         }
 
         call_user_func(static::$authorizationNotifier, $this->livewireComponent, $message);
+    }
+
+    /**
+     * Convert validation error keys from snake_case back to camelCase.
+     * This ensures error messages reference the original property names in the Livewire component.
+     */
+    protected function convertValidationErrorsToCamelCase(Validator $validator): void {
+        $errors            = $validator->errors();
+        $messages          = $errors->messages();
+        $convertedMessages = [];
+        $keysToRemove      = [];
+
+        foreach ($messages as $snakeKey => $errorMessages) {
+            $camelKey = $snakeKey;
+
+            // Handle nested keys (e.g., 'user_info.first_name' -> 'userInfo.firstName')
+            if (str_contains($snakeKey, '.')) {
+                $parts          = explode('.', $snakeKey);
+                $convertedParts = [];
+
+                foreach ($parts as $part) {
+                    $convertedParts[] = $this->camelToSnakeMap[$part] ?? $part;
+                }
+
+                $camelKey = implode('.', $convertedParts);
+            } else {
+                // Check if this key was converted from camelCase
+                $camelKey = $this->camelToSnakeMap[$snakeKey] ?? $snakeKey;
+            }
+
+            $convertedMessages[$camelKey] = $errorMessages;
+
+            // Track keys to remove if they were converted
+            if ($camelKey !== $snakeKey) {
+                $keysToRemove[] = $snakeKey;
+            }
+        }
+
+        // Replace the validator's error messages
+        $errors->merge($convertedMessages);
+
+        // Remove the snake_case keys that were converted
+        foreach ($keysToRemove as $snakeKey) {
+            $errors->forget($snakeKey);
+        }
+    }
+
+    /**
+     * Convert validated data keys from snake_case back to camelCase.
+     * This ensures the data can be properly filled back into the Livewire component.
+     */
+    protected function convertValidatedDataToCamelCase(array $data): array {
+        $converted = [];
+
+        foreach ($data as $snakeKey => $value) {
+            // Get the original camelCase key
+            $camelKey = $this->camelToSnakeMap[$snakeKey] ?? $snakeKey;
+
+            // Recursively convert nested arrays
+            if (is_array($value)) {
+                $value = $this->convertValidatedDataToCamelCase($value);
+            }
+
+            $converted[$camelKey] = $value;
+        }
+
+        return $converted;
     }
 
     /**
